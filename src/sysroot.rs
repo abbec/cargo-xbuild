@@ -113,7 +113,9 @@ fn build_crate(
     }
 
     cmd.arg("--");
-    cmd.env("RUSTFLAGS", &format!("--sysroot {}", home.display()));
+
+    cmd.arg("--sysroot");
+    cmd.arg(home.display().to_string());
     cmd.arg("-Z");
     cmd.arg("force-unstable-if-unmarked");
 
