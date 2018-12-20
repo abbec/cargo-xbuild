@@ -1,6 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::env;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -33,6 +34,7 @@ fn build(
     ctoml: &cargo::Toml,
     home: &Home,
     config: &Config,
+    rustflags: &Rustflags,
     src: &Src,
     hash: u64,
     verbose: bool,
@@ -44,8 +46,8 @@ fn build(
     let dst = rustlib.parent().join("lib");
     util::mkdir(&dst)?;
 
-    build_libcore(cmode, &ctoml, home, src, &dst, verbose)?;
-    build_liballoc(cmode, &ctoml, home, src, &dst, config, verbose)?;
+    build_libcore(cmode, &ctoml, home, src, &dst, rustflags, verbose)?;
+    build_liballoc(cmode, &ctoml, home, src, &dst, config, rustflags, verbose)?;
 
     // Create hash file
     util::write(&rustlib.parent().join(".hash"), &hash.to_string())?;
@@ -60,6 +62,7 @@ fn build_crate(
     ctoml: &cargo::Toml,
     home: &Home,
     dst: &Path,
+    rustflags: &Rustflags,
     verbose: bool,
 ) -> Result<()> {
     let td = TempDir::new("xargo").chain_err(|| "couldn't create a temporary directory")?;
@@ -112,10 +115,13 @@ fn build_crate(
         cmd.arg("-v");
     }
 
-    cmd.arg("--");
+    let flags = rustflags.for_xargo(home);
+    if verbose {
+        writeln!(std::io::stderr(), "+ RUSTFLAGS={:?}", flags).ok();
+    }
+    cmd.env("RUSTFLAGS", flags);
 
-    cmd.arg("--sysroot");
-    cmd.arg(home.display().to_string());
+    cmd.arg("--");
     cmd.arg("-Z");
     cmd.arg("force-unstable-if-unmarked");
 
@@ -139,6 +145,7 @@ fn build_libcore(
     home: &Home,
     src: &Src,
     dst: &Path,
+    rustflags: &Rustflags,
     verbose: bool,
 ) -> Result<()> {
     const TOML: &'static str = r#"
@@ -159,7 +166,7 @@ version = "0.0.0"
     map.insert("dependencies".to_owned(), Value::Table(deps));
     stoml.push_str(&Value::Table(map).to_string());
 
-    build_crate("core", stoml, cmode, ctoml, home, dst, verbose)
+    build_crate("core", stoml, cmode, ctoml, home, dst, rustflags, verbose)
 }
 
 fn build_liballoc(
@@ -169,6 +176,7 @@ fn build_liballoc(
     src: &Src,
     dst: &Path,
     config: &Config,
+    rustflags: &Rustflags,
     verbose: bool,
 ) -> Result<()> {
     const TOML: &'static str = r#"
@@ -195,7 +203,7 @@ version = "0.1.0"
     map.insert("lib".to_owned(), Value::Table(lib));
     stoml.push_str(&Value::Table(map).to_string());
 
-    build_crate("alloc", stoml, cmode, ctoml, home, dst, verbose)
+    build_crate("alloc", stoml, cmode, ctoml, home, dst, rustflags, verbose)
 }
 
 fn old_hash(cmode: &CompilationMode, home: &Home) -> Result<Option<u64>> {
@@ -260,7 +268,7 @@ pub fn update(
     let hash = hash(cmode, rustflags, &ctoml, meta, config)?;
 
     if old_hash(cmode, home)? != Some(hash) {
-        build(cmode, &ctoml, home, config, src, hash, verbose)?;
+        build(cmode, &ctoml, home, config, rustflags, src, hash, verbose)?;
     }
 
     // copy host artifacts into the sysroot, if necessary
